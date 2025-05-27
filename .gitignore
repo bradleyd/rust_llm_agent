@@ -1,0 +1,4 @@
+target/
+**/*.rs.bk
+sample_docs/
+chroma_db
