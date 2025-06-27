@@ -17,7 +17,6 @@ fn run_agent(agent_path: &str, query: &str) -> Option<String> {
     let output = Command::new(agent_path).arg(query).output().ok()?;
 
     if output.status.success() {
-        println!("agent output {}", String::from_utf8_lossy(&output.stdout));
         Some(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
         None
@@ -46,15 +45,15 @@ Use prior conversation history to maintain coherence when needed.
         query.trim()
     )
 }
-fn call_rag(query: &str) -> Option<String> {
+fn call_rag(query: &str, collection: &str) -> Option<String> {
     let client = Client::new();
     // Encode the query
     let encoded_query = encode(query);
 
     // "http://localhost:8000/query?collection=rust-docs&query=VecDequeu::new()"
     let url = format!(
-        "http://localhost:8000/query?collection=rust-docs&query={}",
-        encoded_query
+        "http://localhost:8000/query?collection={}&query={}",
+        collection, encoded_query
     );
 
     match client.get(&url).send() {
@@ -131,8 +130,11 @@ fn main() {
         // github_agent => rust-book,
         // }
         // push to a set
+        // This is because chromadb has different doc setup in the db and the url needs to reflect
+        // which one to call via http.
+        //
         // 2. Run each agent in the plan
-        for (tool, tool_input) in plan {
+        for (tool, tool_input) in &plan {
             println!("Running agent: {} with input: {}", tool, tool_input);
             let agent_path = match tool.as_str() {
                 "crate_agent" => "../agents/crate_agent/target/release/crate_agent",
@@ -158,9 +160,24 @@ fn main() {
 
         // 3. Always run RAG as well
         println!("Getting RAG information");
-        //if let Some(rag) = run_rag_query(query) {
-        if let Some(rag) = call_rag(query) {
-            context_chunks.push(format!("From memory: {}", rag.trim()));
+        let mut rag_collections = std::collections::HashSet::new();
+        for (tool, _) in &plan {
+            match tool.as_str() {
+                "crate_agent" => { rag_collections.insert("crates"); },
+                "docs_agent" => { rag_collections.insert("rust-docs"); },
+                "github_agent" => { rag_collections.insert("rust-book"); },
+                _ => { /* Do nothing for unknown tools */ }
+            }
+        }
+        // Always include rust-docs by default if no specific agent suggested a collection
+        if rag_collections.is_empty() {
+            rag_collections.insert("rust-docs");
+        }
+
+        for collection in rag_collections {
+            if let Some(rag) = call_rag(query, collection) {
+                context_chunks.push(format!("From memory ({}): {}", collection, rag.trim()));
+            }
         }
         //        println!("Memory context retrieved. {:?}", context_chunks);
 
