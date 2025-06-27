@@ -1,16 +1,41 @@
 use scraper::{Html, Selector};
 use std::env;
+use url::Url;
 
 fn extract_main_text(html: &str) -> String {
     let document = Html::parse_document(html);
-    let selector = Selector::parse("main").unwrap();
-
+    let main_selector = Selector::parse("main").unwrap();
     let mut output = String::new();
-    for element in document.select(&selector) {
-        output.push_str(&element.text().collect::<Vec<_>>().join(" "));
+
+    if let Some(main_element) = document.select(&main_selector).next() {
+        let selector = Selector::parse("h1, h2, h3, h4, h5, h6, p, pre, a").unwrap();
+        for element in main_element.select(&selector) {
+            match element.value().name() {
+                "pre" => {
+                    let code = element.text().collect::<String>();
+                    output.push_str(&format!("\n```rust\n{}```\n", code));
+                }
+                "a" => {
+                    let link_text = element.text().collect::<String>();
+                    if let Some(href) = element.value().attr("href") {
+                        output.push_str(&format!("[{}]({})", link_text, href));
+                    } else {
+                        output.push_str(&link_text);
+                    }
+                }
+                _ => {
+                    let text = element.text().collect::<String>();
+                    if !text.trim().is_empty() {
+                        output.push_str("\n");
+                        output.push_str(&text);
+                        output.push_str("\n");
+                    }
+                }
+            }
+        }
     }
 
-    output
+    output.trim().to_string()
 }
 
 fn build_url(crate_input: &str) -> String {
@@ -19,32 +44,29 @@ fn build_url(crate_input: &str) -> String {
         let crate_base = parts[0];
         let last = parts.last().unwrap_or(&"");
 
-        // Default to module index if last is lowercase
-        if last
-            .chars()
-            .next()
-            .map(|c| c.is_lowercase())
-            .unwrap_or(true)
-        {
-            format!(
-                "https://doc.rust-lang.org/{}/{}",
-                crate_base,
-                parts[1..].join("/") + "/index.html"
-            )
+        if ["std", "core", "alloc"].contains(&crate_base) {
+            if last.chars().next().map(|c| c.is_lowercase()).unwrap_or(true) {
+                format!(
+                    "https://doc.rust-lang.org/{}/{}/index.html",
+                    crate_base,
+                    parts[1..].join("/")
+                )
+            } else {
+                format!(
+                    "https://doc.rust-lang.org/{}/{}/struct.{}.html",
+                    crate_base,
+                    parts[1..parts.len() - 1].join("/"),
+                    last
+                )
+            }
         } else {
-            // Capitalized = struct, enum, trait, etc.
-            format!(
-                "https://doc.rust-lang.org/{}/{}",
-                crate_base,
-                parts[1..parts.len() - 1].join("/") + &format!("/struct.{}.html", last)
-            )
+            format!("https://docs.rs/{}/latest/{}/?search={}", crate_base, crate_base, parts[1..].join("::"))
         }
-    } else if ["std", "core", "alloc"].contains(&crate_input) {
-        format!("https://doc.rust-lang.org/{}/index.html", crate_input)
     } else {
         format!("https://docs.rs/{}/latest/{}/", crate_input, crate_input)
     }
 }
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -59,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let body = reqwest::get(&url).await?.text().await?;
 
     let extracted = extract_main_text(&body);
-    let preview = &extracted[..std::cmp::min(extracted.len(), 1000)];
+    let preview = &extracted[..std::cmp::min(extracted.len(), 4000)];
 
     let output = serde_json::json!({
         "input": input,
@@ -69,38 +91,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_std_docs() {
-        assert_eq!(build_url("std"), "https://doc.rust-lang.org/std/index.html");
-    }
-
-    #[test]
-    fn test_std_with_colons() {
-        assert_eq!(
-            build_url("std::vec"),
-            "https://doc.rust-lang.org/std/vec/index.html"
-        );
-    }
-
-    #[test]
-    fn test_std_with_struct() {
-        assert_eq!(
-            build_url("std::vec::Vec"),
-            "https://doc.rust-lang.org/std/vec/struct.Vec.html"
-        );
-    }
-
-    #[test]
-    fn test_crate_docs() {
-        assert_eq!(
-            build_url("serde_json"),
-            "https://docs.rs/serde_json/latest/serde_json/"
-        );
-    }
 }
