@@ -1,104 +1,214 @@
+use core::str;
+use serde_json::Value;
 use std::io::{self, Write};
 use std::process::Command;
+use urlencoding::encode;
+
+mod planner;
+mod router_llm;
+use crate::generate_prompt::format_agent_output_for_llm;
+use planner::generate_plan;
+use prettyprint::PrettyPrinter;
+use reqwest::blocking::Client;
+
 mod generate_prompt;
-use generate_prompt::generate_prompt;
+
+fn run_agent(agent_path: &str, query: &str) -> Option<String> {
+    let output = Command::new(agent_path).arg(query).output().ok()?;
+
+    if output.status.success() {
+        println!("agent output {}", String::from_utf8_lossy(&output.stdout));
+        Some(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        None
+    }
+}
+
+fn generate_prompt(past: &str, context: &str, query: &str) -> String {
+    format!(
+        "You are a helpful Rust programming assistant. \
+You may use your own knowledge and the provided documentation to answer user questions. \
+If the documentation context is helpful, you may cite it. \
+Use prior conversation history to maintain coherence when needed.
+
+### Past conversation:
+{}
+
+### Context:
+{}
+
+### User question:
+{}
+
+### Answer:",
+        past.trim(),
+        context.trim(),
+        query.trim()
+    )
+}
+fn call_rag(query: &str) -> Option<String> {
+    let client = Client::new();
+    // Encode the query
+    let encoded_query = encode(query);
+
+    // "http://localhost:8000/query?collection=rust-docs&query=VecDequeu::new()"
+    let url = format!(
+        "http://localhost:8000/query?collection=rust-docs&query={}",
+        encoded_query
+    );
+
+    match client.get(&url).send() {
+        Ok(response) => match response.json::<Value>() {
+            Ok(json) => {
+                let context = match json.get("docs") {
+                    Some(Value::Array(outer)) => outer
+                        .iter()
+                        .filter_map(|inner| inner.as_array()) // unwrap nested array
+                        .flat_map(|arr| arr.iter()) // flatten into one iterator
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    _ => String::from("No docs found"),
+                };
+                println!("Rag response empty? {:?}", context.is_empty());
+                Some(context)
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to parse JSON: {}", e);
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("❌ HTTP request failed: {}", e);
+            None
+        }
+    }
+}
 
 fn call_local_llm(prompt: &str) -> String {
-    let output = Command::new("ollama")
-        //.args(["run", "phi"])
+    let mut child = Command::new("ollama")
         .args(["run", "openhermes"])
+        //.args(["run", "deepseek-r1:8b"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .and_then(|mut child| {
-            {
-                let stdin = child.stdin.as_mut().unwrap();
-                stdin.write_all(prompt.as_bytes())?;
-            }
-            let output = child.wait_with_output()?;
-            Ok(output)
-        });
+        .expect("Failed to start LLM");
 
-    match output {
-        Ok(out) => String::from_utf8_lossy(&out.stdout).to_string(),
-        Err(_) => "Failed to call local LLM.".to_string(),
-    }
-}
-
-fn route_to_agent(user_input: &str) -> Option<&'static str> {
-    let input = user_input.to_lowercase();
-
-    if input.contains("crate") || input.contains("library") || input.contains("dependency") {
-        println!("using crate agent");
-        Some("crate_agent")
-    } else if input.contains("example") || input.contains("project") || input.contains("github") {
-        println!("using github agent");
-        Some("github_agent")
-    } else if input.contains("how")
-        || input.contains("why")
-        || input.contains("what")
-        || input.contains("program")
     {
-        println!("using docs agent");
-        Some("docs_agent")
-    } else {
-        println!("using no agent");
-        None
+        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+        stdin.write_all(prompt.as_bytes()).unwrap();
     }
-}
 
-fn run_agent(command_path: &str, query: &str) -> Option<serde_json::Value> {
-    let output = std::process::Command::new(command_path)
-        .arg(query)
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let json_str = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(&json_str).ok()
-    } else {
-        eprintln!("Agent failed: {}", command_path);
-        None
-    }
-}
-
-fn run_rag_query(query: &str) -> Option<serde_json::Value> {
-    let output = std::process::Command::new("python3")
-        .arg("python_embedding/query_docs.py")
-        .arg(query)
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let json_str = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(&json_str).ok()
-    } else {
-        eprintln!("RAG query failed");
-        None
-    }
+    let output = child.wait_with_output().expect("Failed to read output");
+    String::from_utf8_lossy(&output.stdout).to_string()
 }
 
 fn main() {
-    println!("Enter your Rust crate topic:");
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    let query = input.trim();
+    let mut history: Vec<(String, String)> = Vec::new();
 
-    let agent_to_use = route_to_agent(&query);
-
-    let agent_output = match agent_to_use {
-        Some("crate_agent") => run_agent("../agents/crate_agent/target/debug/crate_agent", &query),
-        Some("github_agent") => {
-            run_agent("../agents/github_agent/target/debug/github_agent", &query)
+    println!("Rust LLM Chat Assistant (type 'exit' to quit)");
+    loop {
+        print!("> ");
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        let query = input.trim();
+        if query == "exit" || query == "quit" {
+            break;
         }
-        Some("docs_agent") => run_agent("../agents/docs_agent/target/debug/docs_agent", &query),
-        _ => run_rag_query(query),
-    };
 
-    // 4. 🔥 Call generate_prompt here
-    let prompt = generate_prompt(agent_output.as_ref(), &query);
+        let mut context_chunks = Vec::new();
 
-    // 5. Send prompt to local LLM (Ollama)
-    let response = call_local_llm(&prompt);
-    println!("\nLLM Response:\n{}", response);
+        // 1. Get a plan from LLM
+        println!("Planning which tools to use...");
+        let plan = generate_plan(query);
+        println!("Plan {:?}", plan);
+
+        // TODO save tool and pass that to call_rag() to descide which collection to use
+        // match vec contains {
+        // crate_agent => crates
+        // docs_agent => rust-docs,
+        // github_agent => rust-book,
+        // }
+        // push to a set
+        // 2. Run each agent in the plan
+        for (tool, tool_input) in plan {
+            println!("Running agent: {} with input: {}", tool, tool_input);
+            let agent_path = match tool.as_str() {
+                "crate_agent" => "../agents/crate_agent/target/release/crate_agent",
+                "github_agent" => "../agents/github_agent/target/release/github_agent",
+                "docs_agent" => "../agents/docs_agent/target/release/docs_agent",
+                _ => continue,
+            };
+
+            if let Some(response) = run_agent(agent_path, &tool_input) {
+                // Attempt to parse the response as JSON
+                match serde_json::from_str::<Value>(&response) {
+                    Ok(json_value) => {
+                        // If successful, format it using the new function
+                        context_chunks.push(format_agent_output_for_llm(&tool, &json_value));
+                    }
+                    Err(_) => {
+                        // If not JSON, or parsing fails, just push the raw string
+                        context_chunks.push(format!("From {}: {}", tool, response.trim()));
+                    }
+                }
+            }
+        }
+
+        // 3. Always run RAG as well
+        println!("Getting RAG information");
+        //if let Some(rag) = run_rag_query(query) {
+        if let Some(rag) = call_rag(query) {
+            context_chunks.push(format!("From memory: {}", rag.trim()));
+        }
+        //        println!("Memory context retrieved. {:?}", context_chunks);
+
+        // 4. Build conversation memory
+        let past = history
+            .iter()
+            .map(|(q, a)| {
+                format!(
+                    "User: {}
+Assistant: {}",
+                    q, a
+                )
+            })
+            .collect::<Vec<String>>()
+            .join(
+                "
+",
+            );
+        // 5. Build and send prompt
+        let full_context = context_chunks.join(
+            "
+
+",
+        );
+
+        let prompt = generate_prompt(&past, &full_context, query);
+        //println!("DEBUG PROMPT: {:?}", prompt);
+        let response = call_local_llm(&prompt);
+        let printer = PrettyPrinter::default().language("rust").build();
+        match printer {
+            Ok(tprint) => {
+                if tprint.string(&response).is_err() {
+                    println!(
+                        "
+{}
+",
+                        response.trim()
+                    )
+                }
+            }
+            Err(_) => println!(
+                "
+{}
+",
+                response.trim()
+            ),
+        }
+
+        history.push((query.to_string(), response.trim().to_string()));
+    }
 }
