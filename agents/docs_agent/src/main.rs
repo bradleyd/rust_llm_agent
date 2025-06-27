@@ -1,41 +1,37 @@
 use scraper::{Html, Selector};
 use std::env;
-use url::Url;
 
-fn extract_main_text(html: &str) -> String {
+fn extract_docs_as_json(html: &str) -> serde_json::Value {
     let document = Html::parse_document(html);
     let main_selector = Selector::parse("main").unwrap();
-    let mut output = String::new();
+    let mut docs = Vec::new();
 
     if let Some(main_element) = document.select(&main_selector).next() {
-        let selector = Selector::parse("h1, h2, h3, h4, h5, h6, p, pre, a").unwrap();
-        for element in main_element.select(&selector) {
-            match element.value().name() {
-                "pre" => {
-                    let code = element.text().collect::<String>();
-                    output.push_str(&format!("\n```rust\n{}```\n", code));
-                }
-                "a" => {
-                    let link_text = element.text().collect::<String>();
-                    if let Some(href) = element.value().attr("href") {
-                        output.push_str(&format!("[{}]({})", link_text, href));
-                    } else {
-                        output.push_str(&link_text);
-                    }
-                }
-                _ => {
-                    let text = element.text().collect::<String>();
-                    if !text.trim().is_empty() {
-                        output.push_str("\n");
-                        output.push_str(&text);
-                        output.push_str("\n");
-                    }
-                }
+        let content_selector = Selector::parse("p, pre").unwrap();
+        for element in main_element.select(&content_selector) {
+            let name = element.value().name();
+            let text = element.text().collect::<String>().trim().to_string();
+
+            if text.is_empty() {
+                continue;
             }
+
+            let entry = if name == "pre" {
+                serde_json::json!({
+                    "type": "code",
+                    "content": text
+                })
+            } else { // "p"
+                serde_json::json!({
+                    "type": "paragraph",
+                    "content": text
+                })
+            };
+            docs.push(entry);
         }
     }
 
-    output.trim().to_string()
+    serde_json::Value::Array(docs)
 }
 
 fn build_url(crate_input: &str) -> String {
@@ -80,13 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let body = reqwest::get(&url).await?.text().await?;
 
-    let extracted = extract_main_text(&body);
-    let preview = &extracted[..std::cmp::min(extracted.len(), 4000)];
+    let docs = extract_docs_as_json(&body);
 
     let output = serde_json::json!({
         "input": input,
         "url": url,
-        "docs": preview
+        "docs": docs
     });
 
     println!("{}", serde_json::to_string_pretty(&output)?);
