@@ -1,35 +1,37 @@
 import os
+import sys
 import chromadb
-from sentence_transformers import SentenceTransformer
+from chromadb import PersistentClient
+from pathlib import Path
+import argparse
 
-DOC_DIR = "../sample_docs"
+parser = argparse.ArgumentParser(description="Embed Markdown docs into ChromaDB")
+parser.add_argument("--dir", required=True, help="Path to docs directory")
+parser.add_argument("--collection", required=True, help="ChromaDB collection name")
+args = parser.parse_args()
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
+BASE_DIR = Path(__file__).resolve().parent
+CHROMA_PATH = BASE_DIR / "chroma_db"
+client = PersistentClient(path=str(CHROMA_PATH))
 
-# ✅ Use the new persistent API
-client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection("rust_docs")
+collection = client.get_or_create_collection(name=args.collection)
 
-def embed_and_store(filename, content):
-    chunks = content.split("\\n\\n")
-    embeddings = model.encode(chunks)
-    for i, chunk in enumerate(chunks):
-        collection.add(
-            documents=[chunk],
-            embeddings=[embeddings[i].tolist()],
-            metadatas=[{"source": filename}],
-            ids=[f"{filename}_{i}"]
-        )
+docs = []
+ids = []
 
-def main():
-    for fname in os.listdir(DOC_DIR):
-        if not fname.endswith(".md"):
-            continue
-        path = os.path.join(DOC_DIR, fname)
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-            embed_and_store(fname, content)
-    print("Docs embedded and saved to persistent Chroma DB.")
+for file in Path(args.dir).rglob("*.md"):
+    content = file.read_text(encoding="utf-8")
+    docs.append(content)
+    ids.append(str(file.resolve()))
 
-if __name__ == "__main__":
-    main()
+if not docs:
+    print("❌ No .md files found in", args.dir)
+    sys.exit(1)
+
+collection.add(
+    documents=docs,
+    ids=ids[:len(docs)]
+)
+
+print(f"✅ Embedded {len(docs)} documents into collection '{args.collection}'")
+

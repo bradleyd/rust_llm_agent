@@ -133,26 +133,28 @@ fn main() {
         // This is because chromadb has different doc setup in the db and the url needs to reflect
         // which one to call via http.
         //
-        // 2. Run each agent in the plan
-        for (tool, tool_input) in &plan {
-            println!("Running agent: {} with input: {}", tool, tool_input);
-            let agent_path = match tool.as_str() {
-                "crate_agent" => "../agents/crate_agent/target/release/crate_agent",
-                "github_agent" => "../agents/github_agent/target/release/github_agent",
-                "docs_agent" => "../agents/docs_agent/target/release/docs_agent",
-                _ => continue,
-            };
+        // 2. Run each agent in the plan if a plan exists
+        if !plan.is_empty() {
+            for (tool, tool_input) in &plan {
+                println!("Running agent: {} with input: {}", tool, tool_input);
+                let agent_path = match tool.as_str() {
+                    "crate_agent" => "../agents/crate_agent/target/release/crate_agent",
+                    "github_agent" => "../agents/github_agent/target/release/github_agent",
+                    "docs_agent" => "../agents/docs_agent/target/release/docs_agent",
+                    _ => continue,
+                };
 
-            if let Some(response) = run_agent(agent_path, &tool_input) {
-                // Attempt to parse the response as JSON
-                match serde_json::from_str::<Value>(&response) {
-                    Ok(json_value) => {
-                        // If successful, format it using the new function
-                        context_chunks.push(format_agent_output_for_llm(&tool, &json_value));
-                    }
-                    Err(_) => {
-                        // If not JSON, or parsing fails, just push the raw string
-                        context_chunks.push(format!("From {}: {}", tool, response.trim()));
+                if let Some(response) = run_agent(agent_path, &tool_input) {
+                    // Attempt to parse the response as JSON
+                    match serde_json::from_str::<Value>(&response) {
+                        Ok(json_value) => {
+                            // If successful, format it using the new function
+                            context_chunks.push(format_agent_output_for_llm(&tool, &json_value));
+                        }
+                        Err(_) => {
+                            // If not JSON, or parsing fails, just push the raw string
+                            context_chunks.push(format!("From {}: {}", tool, response.trim()));
+                        }
                     }
                 }
             }

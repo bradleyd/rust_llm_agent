@@ -3,7 +3,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 
-SAVE_DIR = "../sample_docs"
+SAVE_DIR = "../sample_docs/crates"
 
 def fetch_crate_doc(crate_name):
     base_url = f"https://docs.rs/{crate_name}/latest/{crate_name}/"
