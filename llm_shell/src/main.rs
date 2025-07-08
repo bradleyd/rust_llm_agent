@@ -50,9 +50,9 @@ fn call_rag(query: &str, collection: &str) -> Option<String> {
     // Encode the query
     let encoded_query = encode(query);
 
-    // "http://localhost:8000/query?collection=rust-docs&query=VecDequeu::new()"
+    // "http://localhost:8000/query?collection=rust-docs&query=VecDequeu::new()&n_results=10"
     let url = format!(
-        "http://localhost:8000/query?collection={}&query={}",
+        "http://localhost:8000/query?collection={}&query={}&n_results=10",
         collection, encoded_query
     );
 
@@ -60,13 +60,12 @@ fn call_rag(query: &str, collection: &str) -> Option<String> {
         Ok(response) => match response.json::<Value>() {
             Ok(json) => {
                 let context = match json.get("docs") {
-                    Some(Value::Array(outer)) => outer
+                    Some(Value::Array(docs)) => docs
                         .iter()
-                        .filter_map(|inner| inner.as_array()) // unwrap nested array
-                        .flat_map(|arr| arr.iter()) // flatten into one iterator
-                        .filter_map(|v| v.as_str())
+                        .filter_map(|doc| doc.get("content")) // get content field from each doc
+                        .filter_map(|content| content.as_str())
                         .collect::<Vec<_>>()
-                        .join("\n"),
+                        .join("\n\n"),
                     _ => String::from("No docs found"),
                 };
                 println!("Rag response empty? {:?}", context.is_empty());

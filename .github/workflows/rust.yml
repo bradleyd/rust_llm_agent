@@ -1,0 +1,127 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+    
+    - name: Cache cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build llm_shell
+      run: cargo build --verbose --manifest-path llm_shell/Cargo.toml
+    
+    - name: Test llm_shell
+      run: cargo test --verbose --manifest-path llm_shell/Cargo.toml
+    
+    - name: Build rag_engine
+      run: cargo build --verbose --manifest-path rag_engine/Cargo.toml
+    
+    - name: Test rag_engine
+      run: cargo test --verbose --manifest-path rag_engine/Cargo.toml
+    
+    - name: Build rag_server
+      run: cargo build --verbose --manifest-path rag_server/Cargo.toml
+    
+    - name: Test rag_server
+      run: cargo test --verbose --manifest-path rag_server/Cargo.toml
+    
+    - name: Build github_agent
+      run: cargo build --verbose --manifest-path agents/github_agent/Cargo.toml
+    
+    - name: Test github_agent
+      run: cargo test --verbose --manifest-path agents/github_agent/Cargo.toml
+    
+    - name: Build docs_agent
+      run: cargo build --verbose --manifest-path agents/docs_agent/Cargo.toml
+    
+    - name: Test docs_agent
+      run: cargo test --verbose --manifest-path agents/docs_agent/Cargo.toml
+    
+    - name: Build crate_agent
+      run: cargo build --verbose --manifest-path agents/crate_agent/Cargo.toml
+    
+    - name: Test crate_agent
+      run: cargo test --verbose --manifest-path agents/crate_agent/Cargo.toml
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+    
+    - name: Cache cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Run clippy
+      run: |
+        cargo clippy --manifest-path llm_shell/Cargo.toml -- -D warnings
+        cargo clippy --manifest-path rag_engine/Cargo.toml -- -D warnings
+        cargo clippy --manifest-path rag_server/Cargo.toml -- -D warnings
+        cargo clippy --manifest-path agents/github_agent/Cargo.toml -- -D warnings
+        cargo clippy --manifest-path agents/docs_agent/Cargo.toml -- -D warnings
+        cargo clippy --manifest-path agents/crate_agent/Cargo.toml -- -D warnings
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+    
+    - name: Run rustfmt
+      run: |
+        cargo fmt --manifest-path llm_shell/Cargo.toml --all -- --check
+        cargo fmt --manifest-path rag_engine/Cargo.toml --all -- --check
+        cargo fmt --manifest-path rag_server/Cargo.toml --all -- --check
+        cargo fmt --manifest-path agents/github_agent/Cargo.toml --all -- --check
+        cargo fmt --manifest-path agents/docs_agent/Cargo.toml --all -- --check
+        cargo fmt --manifest-path agents/crate_agent/Cargo.toml --all -- --check
