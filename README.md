@@ -42,28 +42,50 @@ pip install -r requirements.txt
 You can load any Rust content (books, docs, READMEs) into `ChromaDB`.
 
 ### Supported Sources:
-- Local docs via `rustup`
-- Crate docs via scraping
+- Local docs via `rustup` (HTML extraction + chunking)
+- Crate docs from `docs.rs` (automated fetching)
 - Rust book or stdlib
 - GitHub crate READMEs
 
-### ✅ Embed Docs
+### ✅ Quick Setup - Load All Documentation
 
-Place `.md` or `.txt` files into `python_embedding/sample_docs` under subfolders like:
+**Option 1: Load Rust core docs (Book + Stdlib)**
+```bash
+cd python_embedding
+chmod +x rustup_docs.sh
+./rustup_docs.sh
+```
+
+**Option 2: Load popular crate documentation**
+```bash
+cd python_embedding
+chmod +x crate_docs.sh
+./crate_docs.sh all  # Fetches serde, tokio, clap, etc.
+```
+
+**Option 3: Load specific crate docs**
+```bash
+./crate_docs.sh fetch tokio     # Fetch specific crate
+./crate_docs.sh embed           # Embed all fetched crates
+```
+
+### Manual Document Loading
+
+Place `.md` or `.txt` files into `sample_docs/` under collection folders:
 
 ```bash
 sample_docs/rust-book/
-sample_docs/std/
-sample_docs/crate-clap/
+sample_docs/rust-docs/
+sample_docs/crates/
 ```
 
 Then run:
 
 ```bash
-python embed_docs.py
+python embed_docs.py --dir ../sample_docs/your-collection --collection your-name --chunk-size 800 --overlap 100
 ```
 
-All files will be embedded and stored in `./chroma_db`.
+All files will be embedded with intelligent chunking and stored in `./chroma_db`.
 
 ---
 
@@ -117,15 +139,21 @@ The system will:
 ## 📦 Rust Project Structure
 
 ```
-rust_llm_agent_updated/
-├── llm_shell/           # Main loop for chat + agent orchestration
+rust_llm_agent/
+├── llm_shell/                    # Main chat interface with agent orchestration
+├── rag_engine/                   # Core RAG functionality
+├── rag_server/                   # HTTP server for RAG queries
 ├── agents/
-│   └── github_discovery_agent/  # Rust-based agent for GitHub lookups
+│   ├── github_agent/            # GitHub repository discovery
+│   ├── docs_agent/              # Documentation fetching
+│   └── crate_agent/             # Crate.io integration
 ├── python_embedding/
-│   ├── embed_docs.py
-│   ├── query_docs.py
-│   └── sample_docs/
-└── chroma_db/           # Persistent vector DB
+│   ├── embed_docs.py            # Document embedding with chunking
+│   ├── query_docs.py            # Manual query interface
+│   ├── rustup_docs.sh           # Automated Rust docs extraction
+│   ├── crate_docs.sh            # Crate documentation manager
+│   └── sample_docs/             # Document storage (gitignored)
+└── chroma_db/                   # Persistent vector database
 ```
 
 ---
@@ -133,14 +161,19 @@ rust_llm_agent_updated/
 ## 🧪 Testing Examples
 
 ```bash
-# Embed new docs
-python embed_docs.py
+# Load Rust core documentation
+cd python_embedding
+./rustup_docs.sh
+
+# Load popular crate docs
+./crate_docs.sh all
 
 # Query manually
 python query_docs.py "How do I create a VecDeque?"
 
 # Chat with LLM
-cargo run --bin llm_shell
+cd ../llm_shell
+cargo run
 ```
 
 ---
@@ -154,15 +187,42 @@ cargo run --bin llm_shell
 
 ---
 
-## 💡 Tip
+## 🔧 Advanced Usage
 
-Install Rust docs and books locally:
+### Crate Documentation Management
+
+The `crate_docs.sh` script provides comprehensive crate documentation management:
+
+```bash
+# View all available commands
+./crate_docs.sh
+
+# Fetch specific crates
+./crate_docs.sh fetch serde
+./crate_docs.sh fetch tokio
+
+# Fetch popular crates automatically
+./crate_docs.sh popular
+
+# Re-embed all fetched crates
+./crate_docs.sh embed
+
+# View collection statistics
+./crate_docs.sh stats
+
+# Clear and rebuild everything
+./crate_docs.sh all
+```
+
+### Custom Documentation Sources
+
+Install additional Rust docs locally:
 
 ```bash
 rustup component add rust-docs
 ```
 
-Then extract them into `sample_docs/` for embedding.
+The `rustup_docs.sh` script will automatically extract and embed them with optimal chunking.
 
 ---
 
