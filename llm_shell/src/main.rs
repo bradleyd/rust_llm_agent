@@ -143,12 +143,12 @@ fn main() {
                     _ => continue,
                 };
 
-                if let Some(response) = run_agent(agent_path, &tool_input) {
+                if let Some(response) = run_agent(agent_path, tool_input) {
                     // Attempt to parse the response as JSON
                     match serde_json::from_str::<Value>(&response) {
                         Ok(json_value) => {
                             // If successful, format it using the new function
-                            context_chunks.push(format_agent_output_for_llm(&tool, &json_value));
+                            context_chunks.push(format_agent_output_for_llm(tool, &json_value));
                         }
                         Err(_) => {
                             // If not JSON, or parsing fails, just push the raw string

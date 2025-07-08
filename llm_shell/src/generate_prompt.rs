@@ -33,7 +33,7 @@ pub fn format_agent_output_for_llm(tool_name: &str, agent_info: &Value) -> Strin
 
     // If no specific sections were found, just include the raw JSON string for debugging/fallback
     if context_sections.len() == 1 { // Only "From {tool_name}:" was added
-        context_sections.push(format!("Raw output: {}", agent_info.to_string()));
+        context_sections.push(format!("Raw output: {}", agent_info));
     }
 
     context_sections.join("\n")
