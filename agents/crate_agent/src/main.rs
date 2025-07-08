@@ -1,4 +1,3 @@
-use reqwest;
 use reqwest::header::USER_AGENT;
 use serde::Serialize;
 use serde_json::json;
