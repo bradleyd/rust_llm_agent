@@ -22,12 +22,22 @@ app.add_middleware(
 )
 
 @app.get("/query")
-def query_docs(collection: str = Query(...), query: str = Query(...)):
+def query_docs(collection: str = Query(...), query: str = Query(...), n_results: int = Query(5)):
     col = collections.get(collection)
     if not col:
         return {"error": f"Collection '{collection}' not found"}
-    results = col.query(query_texts=[query], n_results=2)
-    return {"docs": results["documents"]}
+    results = col.query(query_texts=[query], n_results=n_results)
+    
+    # Format results to include metadata for better context
+    formatted_results = []
+    for i, doc in enumerate(results["documents"][0]):
+        result = {
+            "content": doc,
+            "metadata": results.get("metadatas", [{}])[0][i] if results.get("metadatas") else {}
+        }
+        formatted_results.append(result)
+    
+    return {"docs": formatted_results, "total": len(formatted_results)}
 
 if __name__ == "__main__":
     uvicorn.run("rag_server:app", host="127.0.0.1", port=8000, reload=True)
